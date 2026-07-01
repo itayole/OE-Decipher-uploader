@@ -27,23 +27,29 @@ const STEPS = [
   { key: 'results', label: 'תוצאות' },
 ]
 
-function StepIndicator({ step }) {
+function StepIndicator({ step, onStepClick }) {
   const activeIndex = STEPS.findIndex((s) => s.key === step)
   return (
     <div className="steps">
-      {STEPS.map((s, i) => (
-        <Fragment key={s.key}>
-          <div
-            className={`step ${i === activeIndex ? 'active' : ''} ${i < activeIndex ? 'done' : ''}`}
-          >
-            <span className="step-dot">{i < activeIndex ? '✓' : i + 1}</span>
-            <span>{s.label}</span>
-          </div>
-          {i < STEPS.length - 1 && (
-            <div className={`step-line ${i < activeIndex ? 'done' : ''}`} />
-          )}
-        </Fragment>
-      ))}
+      {STEPS.map((s, i) => {
+        const clickable = i < activeIndex
+        return (
+          <Fragment key={s.key}>
+            <div
+              className={`step ${i === activeIndex ? 'active' : ''} ${i < activeIndex ? 'done' : ''} ${clickable ? 'clickable' : ''}`}
+              onClick={clickable ? () => onStepClick(s.key) : undefined}
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+            >
+              <span className="step-dot">{i < activeIndex ? '✓' : i + 1}</span>
+              <span>{s.label}</span>
+            </div>
+            {i < STEPS.length - 1 && (
+              <div className={`step-line ${i < activeIndex ? 'done' : ''}`} />
+            )}
+          </Fragment>
+        )
+      })}
     </div>
   )
 }
@@ -184,6 +190,14 @@ function App() {
     setError(null)
   }
 
+  const handleStepClick = (key) => {
+    if (key === 'upload') {
+      handleReset()
+    } else {
+      setStep(key)
+    }
+  }
+
   return (
     <>
       <header className="app-header">
@@ -196,7 +210,7 @@ function App() {
         </p>
       </header>
 
-      <StepIndicator step={step} />
+      <StepIndicator step={step} onStepClick={handleStepClick} />
 
       {step === 'upload' && (
         <form className="upload-card" onSubmit={handleUpload}>
@@ -227,8 +241,13 @@ function App() {
         <section>
           <div className="results-header">
             <h2>מיפוי {blocks.length} שאלות פתוחות</h2>
-            <button type="button" className="secondary" onClick={handleReset}>
-              חזרה להעלאה
+            <button
+              type="button"
+              className="primary"
+              disabled={loading || incompletePairs.length > 0}
+              onClick={handleGenerate}
+            >
+              {loading ? 'מפיק קבצים...' : 'הפקת קבצים'}
             </button>
           </div>
           <p className="subtitle">
@@ -323,15 +342,6 @@ function App() {
               יש לבחור "תשובה לניקוי" עבור הזוגות: {incompletePairs.join(', ')}
             </div>
           )}
-
-          <button
-            type="button"
-            className="primary"
-            disabled={loading || incompletePairs.length > 0}
-            onClick={handleGenerate}
-          >
-            {loading ? 'מפיק קבצים...' : 'הפקת קבצים'}
-          </button>
         </section>
       )}
 

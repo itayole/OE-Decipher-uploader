@@ -50,6 +50,20 @@
   color: var(--text);
 }
 
+.step.clickable {
+  cursor: pointer;
+}
+
+.step.clickable:hover {
+  color: var(--accent);
+}
+
+.step.clickable:hover .step-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
 .step-line {
   flex: 1;
   height: 2px;
