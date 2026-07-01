@@ -150,3 +150,75 @@ table.preview th {
   margin: 8px 0 0;
   padding-inline-start: 20px;
 }
+
+.mapping-table {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.mapping-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+.mapping-row-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.mapping-name {
+  font-weight: 700;
+  color: var(--text-h);
+  min-width: 90px;
+}
+
+.mapping-row-main select {
+  margin-inline-start: auto;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.mapping-warning {
+  margin-top: 8px;
+  color: #a11;
+  font-size: 13px;
+}
+
+.mapping-ab-config {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+
+.mapping-ab-config label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mapping-ab-config select {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.type-badge {
+  display: inline-block;
+  margin-inline-start: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}

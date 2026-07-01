@@ -1,48 +1,65 @@
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
-from processing import process_workbook, zip_dat_files
+from processing import detect_and_describe, generate_outputs, zip_dat_files
 
 app = FastAPI(title="OE Decipher Uploader", version="0.1.0")
 
-# job_id -> {"blocks": [...], "dat_files": {filename: bytes}}
+# job_id -> {"file_bytes": bytes, "dat_files": {filename: bytes} | None}
 JOBS: dict[str, dict] = {}
 
 
-@app.post("/api/process")
-async def process(otc_file: UploadFile = File(...)):
+@app.post("/api/upload")
+async def upload(otc_file: UploadFile = File(...)):
     if not otc_file.filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(400, "Please upload an .xlsx file")
 
     file_bytes = await otc_file.read()
     try:
-        result = process_workbook(file_bytes)
+        description = detect_and_describe(file_bytes)
     except Exception as exc:
         raise HTTPException(400, f"Failed to process file: {exc}") from exc
 
-    if not result["blocks"]:
+    if not description["blocks"]:
         raise HTTPException(400, "No question blocks with coded answers were detected")
 
     job_id = uuid.uuid4().hex
-    JOBS[job_id] = result
+    JOBS[job_id] = {"file_bytes": file_bytes, "dat_files": None}
+
+    return {"job_id": job_id, "blocks": description["blocks"]}
+
+
+@app.post("/api/generate")
+async def generate(payload: dict = Body(...)):
+    job_id = payload.get("job_id")
+    mapping = payload.get("mapping", [])
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found or expired")
+
+    try:
+        result = generate_outputs(job["file_bytes"], mapping)
+    except Exception as exc:
+        raise HTTPException(400, f"Failed to generate output: {exc}") from exc
+
+    job["dat_files"] = result["dat_files"]
 
     return {
         "job_id": job_id,
-        "blocks": [
-            {k: v for k, v in b.items() if k != "dat_files"} for b in result["blocks"]
-        ],
+        "warnings": result["warnings"],
+        "blocks": [{k: v for k, v in b.items()} for b in result["blocks"]],
     }
 
 
 @app.get("/api/download/{job_id}")
 async def download(job_id: str):
     job = JOBS.get(job_id)
-    if not job:
-        raise HTTPException(404, "Job not found or expired")
+    if not job or not job.get("dat_files"):
+        raise HTTPException(404, "Job not found or not yet generated")
     zip_bytes = zip_dat_files(job["dat_files"])
     return Response(
         content=zip_bytes,
