@@ -1,0 +1,47 @@
+:root {
+  --text: #3f3f46;
+  --text-h: #08060d;
+  --bg: #fff;
+  --border: #e5e4e7;
+  --accent: #aa3bff;
+  --accent-bg: rgba(170, 59, 255, 0.08);
+  --table-head: #f4f3ec;
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, Consolas, monospace;
+
+  font: 16px/145% var(--sans);
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  direction: rtl;
+}
+
+#root {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  font-size: 28px;
+  color: var(--text-h);
+  margin: 0 0 4px;
+}
+
+h2 {
+  font-size: 18px;
+  color: var(--text-h);
+  margin: 0 0 12px;
+}
+
+.subtitle {
+  color: var(--text);
+  margin-bottom: 24px;
+}
