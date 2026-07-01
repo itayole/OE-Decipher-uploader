@@ -318,7 +318,9 @@ function App() {
                 <div className="mapping-row" key={block.name}>
                   <div className="mapping-row-main">
                     <span className="mapping-name">{block.name}</span>
-                    <span className="block-meta">{block.code_count} עמודות קוד</span>
+                    <span className="block-meta">
+                      {block.code_count} עמודות קוד · {block.answered_count} תשובות לא ריקות
+                    </span>
                     <select
                       value={type}
                       onChange={(e) =>
@@ -414,7 +416,9 @@ function App() {
                   <span className={`type-badge ${block.type}`}>{TYPE_BADGE[block.type] || block.type}</span>
                 </span>
                 <span className="block-meta">
-                  {block.row_count} רשומות · {block.filename}
+                  {block.row_count} רשומות
+                  {block.answered_count != null && ` · ${block.answered_count} תשובות לא ריקות`} ·{' '}
+                  {block.filename}
                 </span>
               </summary>
               <div className="table-wrap">

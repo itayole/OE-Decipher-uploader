@@ -150,6 +150,21 @@ def suggest_ab_pairs(blocks: list[QuestionBlock]) -> dict:
     return suggestions
 
 
+def count_answered(ws, block: QuestionBlock) -> int:
+    """Number of respondents with at least one non-blank code in this block."""
+    max_row = ws.max_row
+    count = 0
+    for r in range(2, max_row + 1):
+        if any(normalize(ws.cell(row=r, column=c).value) is not None for c in block.code_col_indices):
+            count += 1
+    return count
+
+
+def count_answered_rows(rows: list[list]) -> int:
+    """Same as count_answered, for already-built [record, uuid, *codes] rows."""
+    return sum(1 for row in rows if any(normalize(v) is not None for v in row[2:]))
+
+
 def build_block_rows(ws, block: QuestionBlock) -> tuple[list[str], list[list]]:
     max_row = ws.max_row
     columns = ["record", "uuid"] + [f"code{i+1}" for i in range(block.code_count)]
@@ -259,6 +274,7 @@ def detect_and_describe(file_bytes: bytes) -> dict:
             {
                 "name": block.name,
                 "code_count": block.code_count,
+                "answered_count": count_answered(ws, block),
                 "suggested_type": BLOCK_TYPE_AB if suggestion else BLOCK_TYPE_REGULAR,
                 "paired_with": suggestion["paired_with"] if suggestion else None,
                 "role": suggestion["role"] if suggestion else None,
@@ -322,6 +338,7 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict]) -> dict:
                 "role": "A",
                 "code_count": block_a.code_count,
                 "row_count": len(rows_a),
+                "answered_count": count_answered_rows(rows_a),
                 "filename": fname_a,
                 "columns": cols_a,
                 "preview_rows": rows_a[:20],
@@ -334,6 +351,7 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict]) -> dict:
                 "role": "B",
                 "code_count": block_b.code_count,
                 "row_count": len(rows_b),
+                "answered_count": count_answered_rows(rows_b),
                 "filename": fname_b,
                 "columns": cols_b,
                 "preview_rows": rows_b[:20],
@@ -345,6 +363,7 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict]) -> dict:
                 "type": "log",
                 "code_count": None,
                 "row_count": len(log_rows),
+                "answered_count": None,
                 "filename": fname_log,
                 "columns": ["record", "uuid", "rule", "block", "column", "old_value", "new_value"],
                 "preview_rows": log_rows[:20],
@@ -367,6 +386,7 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict]) -> dict:
                 "role": None,
                 "code_count": block.code_count,
                 "row_count": len(rows),
+                "answered_count": count_answered_rows(rows),
                 "filename": filename,
                 "columns": columns,
                 "preview_rows": rows[:20],
