@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 
 from openpyxl import load_workbook
 
+from xml_template import assemble_xml, read_default_template
+
 CODING_SHEET_CANDIDATES = ["קידוד", "coding"]
 CATEGORY_SHEET_CANDIDATES = ["קטגוריות", "categories"]
 SAMPLE_SIZE = 20
@@ -284,18 +286,20 @@ def detect_and_describe(file_bytes: bytes) -> dict:
     return {"blocks": results}
 
 
-def generate_outputs(file_bytes: bytes, mapping: list[dict]) -> dict:
-    """Step 2: apply the confirmed type mapping and produce the .dat / log
-    files. `mapping` is a list of {name, type, cleaned_code?}."""
+def generate_outputs(file_bytes: bytes, mapping: list[dict], template_text: str | None = None) -> dict:
+    """Step 2: apply the confirmed type mapping and produce the .dat / log /
+    XML files. `mapping` is a list of {name, type, cleaned_code?}."""
     wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = _find_sheet(wb, CODING_SHEET_CANDIDATES)
     blocks = {b.name: b for b in detect_blocks(ws) if b.code_count > 0}
     mapping_by_name = {m["name"]: m for m in mapping if m["name"] in blocks}
+    categories = load_categories(wb)
 
     results = []
     dat_files = {}
     warnings = []
     handled = set()
+    xml_question_entries = []
 
     ab_entries = [m for m in mapping_by_name.values() if m.get("type") == BLOCK_TYPE_AB]
     ab_suggestions = suggest_ab_pairs(list(blocks.values()))
@@ -371,6 +375,20 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict]) -> dict:
         )
         handled.add(name)
         handled.add(paired_name)
+        xml_question_entries.append(
+            {
+                "name": f"{block_a.name}_coded",
+                "code_count": block_a.code_count,
+                "categories": categories.get(block_a.name, []),
+            }
+        )
+        xml_question_entries.append(
+            {
+                "name": f"{block_b.name}_coded",
+                "code_count": block_b.code_count,
+                "categories": categories.get(block_b.name, []),
+            }
+        )
 
     for name, block in blocks.items():
         if name in handled:
@@ -390,6 +408,35 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict]) -> dict:
                 "filename": filename,
                 "columns": columns,
                 "preview_rows": rows[:20],
+            }
+        )
+        xml_question_entries.append(
+            {
+                "name": f"{block.name}_coded",
+                "code_count": block.code_count,
+                "categories": categories.get(block.name, []),
+            }
+        )
+
+    if template_text is None:
+        template_text = read_default_template()
+    xml_bytes, xml_warnings = assemble_xml(template_text, xml_question_entries)
+    warnings.extend(xml_warnings)
+    if xml_bytes is not None:
+        xml_filename = "survey_openends.xml"
+        dat_files[xml_filename] = xml_bytes
+        results.append(
+            {
+                "question_name": "XML",
+                "type": "xml",
+                "role": None,
+                "code_count": None,
+                "row_count": None,
+                "answered_count": None,
+                "filename": xml_filename,
+                "columns": None,
+                "preview_rows": None,
+                "text_preview": xml_bytes.decode("utf-8")[:4000],
             }
         )
 

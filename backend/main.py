@@ -1,11 +1,13 @@
+import json
 import uuid
 from pathlib import Path
 
-from fastapi import Body, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from processing import detect_and_describe, generate_outputs, zip_dat_files
+from xml_template import extract_template_block, read_default_template, write_default_template
 
 app = FastAPI(title="OE Decipher Uploader", version="0.2.0")
 
@@ -34,15 +36,27 @@ async def upload(otc_file: UploadFile = File(...)):
 
 
 @app.post("/api/generate")
-async def generate(payload: dict = Body(...)):
-    job_id = payload.get("job_id")
-    mapping = payload.get("mapping", [])
+async def generate(
+    job_id: str = Form(...),
+    mapping: str = Form(...),
+    xml_template_file: UploadFile | None = File(None),
+):
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(404, "Job not found or expired")
 
     try:
-        result = generate_outputs(job["file_bytes"], mapping)
+        mapping_list = json.loads(mapping)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, f"Invalid mapping payload: {exc}") from exc
+
+    template_text = None
+    if xml_template_file is not None:
+        template_bytes = await xml_template_file.read()
+        template_text = template_bytes.decode("utf-8")
+
+    try:
+        result = generate_outputs(job["file_bytes"], mapping_list, template_text=template_text)
     except Exception as exc:
         raise HTTPException(400, f"Failed to generate output: {exc}") from exc
 
@@ -51,7 +65,7 @@ async def generate(payload: dict = Body(...)):
     return {
         "job_id": job_id,
         "warnings": result["warnings"],
-        "blocks": [{k: v for k, v in b.items()} for b in result["blocks"]],
+        "blocks": result["blocks"],
     }
 
 
@@ -66,6 +80,25 @@ async def download(job_id: str):
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=coded_dat_files.zip"},
     )
+
+
+@app.get("/api/xml-template")
+async def get_xml_template():
+    content = read_default_template()
+    return PlainTextResponse(
+        content,
+        headers={"Content-Disposition": "attachment; filename=xml_template.txt"},
+    )
+
+
+@app.post("/api/xml-template")
+async def update_xml_template(template_file: UploadFile = File(...)):
+    content = (await template_file.read()).decode("utf-8")
+    block = extract_template_block(content)
+    if not block.strip():
+        raise HTTPException(400, "Template file appears to be empty")
+    write_default_template(content)
+    return {"status": "ok"}
 
 
 STATIC_DIR = Path(__file__).parent / "static"

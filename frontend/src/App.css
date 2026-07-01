@@ -461,3 +461,88 @@ select:focus {
   background: var(--warn-bg);
   color: var(--warn);
 }
+
+.type-badge.xml {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+/* ── XML template panel ─────────────────────────────────────────────── */
+
+.template-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.template-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.template-panel-body {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.template-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.template-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.hint-block {
+  margin: 4px 0 0;
+  color: #9795a0;
+  font-size: 13px;
+}
+
+.template-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.success-box {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid rgba(22, 163, 74, 0.3);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+
+.xml-preview-wrap {
+  margin-top: 16px;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--table-head);
+}
+
+.xml-preview {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: var(--mono);
+  font-size: 13px;
+  direction: ltr;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

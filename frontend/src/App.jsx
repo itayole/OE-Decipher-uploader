@@ -13,6 +13,7 @@ const TYPE_BADGE = {
   ab: 'AB',
   closed_others: 'סגורה + אחר',
   log: 'לוג ניקוי',
+  xml: 'XML',
 }
 
 function parseAbSuffix(name) {
@@ -160,6 +161,11 @@ function App() {
 
   const [result, setResult] = useState(null)
 
+  const [adHocTemplateFile, setAdHocTemplateFile] = useState(null)
+  const [templateUpdateFile, setTemplateUpdateFile] = useState(null)
+  const [templateStatus, setTemplateStatus] = useState(null) // {type: 'success'|'error', message}
+  const [templateUpdating, setTemplateUpdating] = useState(false)
+
   const blocksByName = useMemo(() => {
     const map = {}
     blocks.forEach((b) => (map[b.name] = b))
@@ -244,12 +250,15 @@ function App() {
       return entry
     })
 
+    const formData = new FormData()
+    formData.append('job_id', jobId)
+    formData.append('mapping', JSON.stringify(mapping))
+    if (adHocTemplateFile) {
+      formData.append('xml_template_file', adHocTemplateFile)
+    }
+
     try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ job_id: jobId, mapping }),
-      })
+      const res = await fetch('/api/generate', { method: 'POST', body: formData })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'שגיאה בהפקת הקבצים')
       setResult(data)
@@ -258,6 +267,29 @@ function App() {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDownloadTemplate = () => {
+    window.location.href = '/api/xml-template'
+  }
+
+  const handleUpdateTemplate = async () => {
+    if (!templateUpdateFile) return
+    setTemplateUpdating(true)
+    setTemplateStatus(null)
+    const formData = new FormData()
+    formData.append('template_file', templateUpdateFile)
+    try {
+      const res = await fetch('/api/xml-template', { method: 'POST', body: formData })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'שגיאה בעדכון התבנית')
+      setTemplateStatus({ type: 'success', message: 'תבנית ברירת המחדל עודכנה בהצלחה' })
+      setTemplateUpdateFile(null)
+    } catch (err) {
+      setTemplateStatus({ type: 'error', message: err.message })
+    } finally {
+      setTemplateUpdating(false)
     }
   }
 
@@ -274,6 +306,8 @@ function App() {
     setCleanCodeByBase({})
     setResult(null)
     setError(null)
+    setAdHocTemplateFile(null)
+    setTemplateStatus(null)
   }
 
   const handleStepClick = (key) => {
@@ -430,6 +464,71 @@ function App() {
               יש לבחור "תשובה לניקוי" עבור הזוגות: {incompletePairs.join(', ')}
             </div>
           )}
+
+          <details className="template-panel">
+            <summary>תבנית XML לייצוא</summary>
+            <div className="template-panel-body">
+              <div className="template-row">
+                <div>
+                  <strong>תבנית ברירת המחדל של השרת</strong>
+                  <p className="hint-block">משמשת לכל הייצואים, אלא אם הועלתה תבנית חד-פעמית למטה.</p>
+                </div>
+                <button type="button" className="secondary" onClick={handleDownloadTemplate}>
+                  הורדת התבנית הנוכחית
+                </button>
+              </div>
+
+              <div className="template-row">
+                <div>
+                  <strong>עדכון תבנית ברירת המחדל (קבוע)</strong>
+                  <p className="hint-block">יחליף את התבנית עבור כל הייצואים העתידיים, עד לעדכון הבא.</p>
+                </div>
+                <div className="template-actions">
+                  <input
+                    type="file"
+                    accept=".txt,.xml"
+                    onChange={(e) => setTemplateUpdateFile(e.target.files?.[0] ?? null)}
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!templateUpdateFile || templateUpdating}
+                    onClick={handleUpdateTemplate}
+                  >
+                    {templateUpdating ? 'מעדכן...' : 'עדכון התבנית'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="template-row">
+                <div>
+                  <strong>תבנית חד-פעמית לייצוא זה בלבד</strong>
+                  <p className="hint-block">
+                    לא נשמרת בשרת — תשמש רק להפקת הקבצים הבאה
+                    {adHocTemplateFile ? ` (${adHocTemplateFile.name})` : ''}.
+                  </p>
+                </div>
+                <div className="template-actions">
+                  <input
+                    type="file"
+                    accept=".txt,.xml"
+                    onChange={(e) => setAdHocTemplateFile(e.target.files?.[0] ?? null)}
+                  />
+                  {adHocTemplateFile && (
+                    <button type="button" className="secondary" onClick={() => setAdHocTemplateFile(null)}>
+                      ביטול
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {templateStatus && (
+                <div className={templateStatus.type === 'error' ? 'error-box' : 'success-box'}>
+                  {templateStatus.message}
+                </div>
+              )}
+            </div>
+          </details>
         </section>
       )}
 
@@ -463,31 +562,38 @@ function App() {
                   <span className={`type-badge ${block.type}`}>{TYPE_BADGE[block.type] || block.type}</span>
                 </span>
                 <span className="block-meta">
-                  {block.row_count} רשומות
-                  {block.answered_count != null && ` · ${block.answered_count} תשובות לא ריקות`} ·{' '}
+                  {block.row_count != null && `${block.row_count} רשומות`}
+                  {block.answered_count != null && ` · ${block.answered_count} תשובות לא ריקות`}
+                  {block.row_count != null || block.answered_count != null ? ' · ' : ''}
                   {block.filename}
                 </span>
               </summary>
-              <div className="table-wrap">
-                <table className="preview">
-                  <thead>
-                    <tr>
-                      {block.columns.map((col) => (
-                        <th key={col}>{col}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {block.preview_rows.map((row, i) => (
-                      <tr key={i}>
-                        {row.map((cell, j) => (
-                          <td key={j}>{cell ?? ''}</td>
+              {block.type === 'xml' ? (
+                <div className="xml-preview-wrap">
+                  <pre className="xml-preview">{block.text_preview}</pre>
+                </div>
+              ) : (
+                <div className="table-wrap">
+                  <table className="preview">
+                    <thead>
+                      <tr>
+                        {block.columns.map((col) => (
+                          <th key={col}>{col}</th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {block.preview_rows.map((row, i) => (
+                        <tr key={i}>
+                          {row.map((cell, j) => (
+                            <td key={j}>{cell ?? ''}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </details>
           ))}
         </section>

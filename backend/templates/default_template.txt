@@ -1,0 +1,58 @@
+----------------------------------------------------------------------
+<exec when="virtualInit">
+q32_coded = File("q32_coded.dat","record")
+</exec>
+
+<text
+  label="vq32_coded_data"
+  optional="0">
+  <title>vq326 Coded Data</title>
+  <virtual>
+respData = q32_coded.get(record)
+
+if respData:
+    for eachRow in vq32_coded_data.rows:
+      eachRow.val = respData["code" + eachRow.label.strip("r") ].strip("\r\n")
+  </virtual>
+  <row label="r1">code1</row>
+  <row label="r2">code2</row>
+  <row label="r3">code3</row>
+  <row label="r4">code4</row>
+  <row label="r5">code5</row>
+
+</text>
+
+<suspend/>
+
+<checkbox
+  label="vq32_coded"
+  atleast="1">
+  <title>vq326 Coded Data</title>
+  <virtual>
+for eachRow in vq32_coded_data.rows:
+    if eachRow.val:
+        data.attr("r" + eachRow.val).val = 1
+  </virtual>
+ <row label="r1">ספיגה מוגברת בלילה/ללא דליפות</row>
+ <row label="r3">נוחות לתינוק</row>
+ <row label="r4">טכנולוגיה חדשה בחיתולים</row>
+ <row label="r5">תינוקות מאושרים</row>
+ <row label="r6">הגנה על עור התינוק</row>
+ <row label="r7">פרסומות עם משפיענים</row>
+ <row label="r8">מותאם ללילה/חיתולי לילה</row>
+ <row label="r9">חיתולים חדשים</row>
+ <row label="r10">קריינות והסברים/אייל קיציס</row>
+ <row label="r11">We Got You Baby/סלוגן</row>
+ <row label="r12">לא זוכרת</row>
+ <row label="r13">הכי טוב לתינוק</row>
+ <row label="r14">תינוק שישן כל הלילה</row>
+ <row label="r15">תינוק מדבר</row>
+ <row label="r16">אמא ותינוק</row>
+ <row label="r17">תינוק עם חיתול</row>
+ <row label="r18">מתאים לתינוקות</row>
+ <row label="r19">ציינו פרטים על התינוק</row>
+ <row label="r20">הארכת חופשת לידה/הגרלה</row>
+ <row label="r99">אחר</row>
+
+</checkbox>
+----------------------------------------------------------------------
