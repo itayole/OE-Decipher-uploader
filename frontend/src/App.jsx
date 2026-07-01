@@ -323,7 +323,7 @@ function App() {
       <header className="app-header">
         <div className="app-header-row">
           <span className="brand-mark">OE</span>
-          <h1>העלאת שאלות פתוחות מקודדות ל-Decipher</h1>
+          <h1>הכנת שאלות פתוחות להעלאה לדיסייפר</h1>
         </div>
         <p className="subtitle">
           העלו את קובץ ה-OTC המקודד, מפו את סוגי השאלות, וקבלו קבצי .dat מוכנים להעלאה ל-Decipher.
