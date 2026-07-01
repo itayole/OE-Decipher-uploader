@@ -22,6 +22,8 @@ function parseAbSuffix(name) {
 }
 
 const DONT_KNOW_KEYWORDS = [
+  'לא ראיתי',
+  'לא ראתה',
   'לא מכיר',
   'לא מכירה',
   'לא מוכר',
@@ -37,11 +39,22 @@ const DONT_KNOW_KEYWORDS = [
   'unfamiliar',
 ]
 
+// Words that mark a conditional/hedged answer (e.g. "ראיתי אבל לא זוכר של מי")
+// rather than a plain "don't know" — these should be deprioritized.
+const CONDITIONAL_MARKERS = ['אבל', 'אך ', 'אולם', 'רק ']
+
 function guessDontKnowCode(categories) {
-  const match = categories.find((c) =>
+  const candidates = categories.filter((c) =>
     DONT_KNOW_KEYWORDS.some((kw) => (c.label || '').toLowerCase().includes(kw))
   )
-  return match ? match.code : null
+  if (!candidates.length) return null
+
+  const simple = candidates.filter(
+    (c) => !CONDITIONAL_MARKERS.some((kw) => (c.label || '').includes(kw))
+  )
+  const pool = simple.length ? simple : candidates
+  const best = [...pool].sort((a, b) => (a.label || '').length - (b.label || '').length)[0]
+  return best.code
 }
 
 const STEPS = [
@@ -77,13 +90,36 @@ function StepIndicator({ step, onStepClick }) {
   )
 }
 
-function DropzoneInput({ label, hint, file, disabled, onChange }) {
+function DropzoneInput({ label, hint, file, disabled, onFile }) {
+  const [isDragging, setIsDragging] = useState(false)
+
+  const handleDragOver = (e) => {
+    if (disabled) return
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = () => setIsDragging(false)
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setIsDragging(false)
+    if (disabled) return
+    const dropped = e.dataTransfer.files?.[0]
+    if (dropped) onFile(dropped)
+  }
+
   return (
     <div className="field">
       <label>
         {label} <span className="hint">{hint}</span>
       </label>
-      <label className={`dropzone ${disabled ? 'disabled' : ''}`}>
+      <label
+        className={`dropzone ${disabled ? 'disabled' : ''} ${isDragging ? 'dragging' : ''}`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         <span className="dropzone-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 16V4M12 4l-4 4M12 4l4 4" strokeLinecap="round" strokeLinejoin="round" />
@@ -91,9 +127,20 @@ function DropzoneInput({ label, hint, file, disabled, onChange }) {
           </svg>
         </span>
         <span className="dropzone-text">
-          {file ? <strong>{file.name}</strong> : disabled ? 'לא זמין בשלב זה' : 'לחצו לבחירת קובץ xlsx'}
+          {file ? (
+            <strong>{file.name}</strong>
+          ) : disabled ? (
+            'לא זמין בשלב זה'
+          ) : (
+            'לחצו לבחירת קובץ xlsx או גררו אותו לכאן'
+          )}
         </span>
-        <input type="file" accept=".xlsx,.xlsm" disabled={disabled} onChange={onChange} />
+        <input
+          type="file"
+          accept=".xlsx,.xlsm"
+          disabled={disabled}
+          onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+        />
       </label>
     </div>
   )
@@ -257,7 +304,7 @@ function App() {
             label="קובץ OTC מקודד (xlsx)"
             hint="חובה"
             file={otcFile}
-            onChange={(e) => setOtcFile(e.target.files?.[0] ?? null)}
+            onFile={(f) => setOtcFile(f ?? null)}
           />
 
           <DropzoneInput
@@ -265,7 +312,7 @@ function App() {
             hint="אופציונלי — עדיין לא בשימוש בשלב זה"
             file={rawFile}
             disabled
-            onChange={(e) => setRawFile(e.target.files?.[0] ?? null)}
+            onFile={(f) => setRawFile(f ?? null)}
           />
 
           <button type="submit" className="primary" disabled={!otcFile || loading}>
