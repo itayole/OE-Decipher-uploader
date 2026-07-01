@@ -1,3 +1,71 @@
+/* ── User guide ─────────────────────────────────────────────────────── */
+
+.guide-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow-sm);
+}
+
+.guide-panel summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text-h);
+}
+
+.guide-body {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.guide-body section {
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.guide-body section:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.guide-body h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: var(--accent);
+}
+
+.guide-body p {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.guide-body p:last-child {
+  margin-bottom: 0;
+}
+
+.guide-body ol,
+.guide-body ul {
+  margin: 0;
+  padding-inline-start: 22px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.guide-body strong {
+  color: var(--text-h);
+}
+
 /* ── Step indicator ─────────────────────────────────────────────────── */
 
 .steps {
