@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import './App.css'
 import { APP_VERSION, RELEASE_NOTES } from './releaseNotes'
 
@@ -19,6 +19,55 @@ function parseAbSuffix(name) {
   const m = /^(.*?)([aAbB])$/.exec(name)
   if (!m) return null
   return { base: m[1], letter: m[2].toLowerCase() }
+}
+
+const STEPS = [
+  { key: 'upload', label: 'העלאה' },
+  { key: 'mapping', label: 'מיפוי שאלות' },
+  { key: 'results', label: 'תוצאות' },
+]
+
+function StepIndicator({ step }) {
+  const activeIndex = STEPS.findIndex((s) => s.key === step)
+  return (
+    <div className="steps">
+      {STEPS.map((s, i) => (
+        <Fragment key={s.key}>
+          <div
+            className={`step ${i === activeIndex ? 'active' : ''} ${i < activeIndex ? 'done' : ''}`}
+          >
+            <span className="step-dot">{i < activeIndex ? '✓' : i + 1}</span>
+            <span>{s.label}</span>
+          </div>
+          {i < STEPS.length - 1 && (
+            <div className={`step-line ${i < activeIndex ? 'done' : ''}`} />
+          )}
+        </Fragment>
+      ))}
+    </div>
+  )
+}
+
+function DropzoneInput({ label, hint, file, disabled, onChange }) {
+  return (
+    <div className="field">
+      <label>
+        {label} <span className="hint">{hint}</span>
+      </label>
+      <label className={`dropzone ${disabled ? 'disabled' : ''}`}>
+        <span className="dropzone-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 16V4M12 4l-4 4M12 4l4 4" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+        <span className="dropzone-text">
+          {file ? <strong>{file.name}</strong> : disabled ? 'לא זמין בשלב זה' : 'לחצו לבחירת קובץ xlsx'}
+        </span>
+        <input type="file" accept=".xlsx,.xlsm" disabled={disabled} onChange={onChange} />
+      </label>
+    </div>
+  )
 }
 
 function App() {
@@ -137,36 +186,34 @@ function App() {
 
   return (
     <>
-      <h1>העלאת שאלות פתוחות מקודדות ל-Decipher</h1>
-      <p className="subtitle">
-        העלו את קובץ ה-OTC המקודד, מפו את סוגי השאלות, וקבלו קבצי .dat מוכנים להעלאה ל-Decipher.
-      </p>
+      <header className="app-header">
+        <div className="app-header-row">
+          <span className="brand-mark">OE</span>
+          <h1>העלאת שאלות פתוחות מקודדות ל-Decipher</h1>
+        </div>
+        <p className="subtitle">
+          העלו את קובץ ה-OTC המקודד, מפו את סוגי השאלות, וקבלו קבצי .dat מוכנים להעלאה ל-Decipher.
+        </p>
+      </header>
+
+      <StepIndicator step={step} />
 
       {step === 'upload' && (
         <form className="upload-card" onSubmit={handleUpload}>
-          <div className="field">
-            <label>
-              קובץ OTC מקודד (xlsx) <span className="hint">חובה</span>
-            </label>
-            <input
-              type="file"
-              accept=".xlsx,.xlsm"
-              onChange={(e) => setOtcFile(e.target.files?.[0] ?? null)}
-            />
-          </div>
+          <DropzoneInput
+            label="קובץ OTC מקודד (xlsx)"
+            hint="חובה"
+            file={otcFile}
+            onChange={(e) => setOtcFile(e.target.files?.[0] ?? null)}
+          />
 
-          <div className="field">
-            <label>
-              קובץ נתונים גולמי מ-Decipher (xlsx){' '}
-              <span className="hint">אופציונלי — עדיין לא בשימוש בשלב זה</span>
-            </label>
-            <input
-              type="file"
-              accept=".xlsx,.xlsm"
-              disabled
-              onChange={(e) => setRawFile(e.target.files?.[0] ?? null)}
-            />
-          </div>
+          <DropzoneInput
+            label="קובץ נתונים גולמי מ-Decipher (xlsx)"
+            hint="אופציונלי — עדיין לא בשימוש בשלב זה"
+            file={rawFile}
+            disabled
+            onChange={(e) => setRawFile(e.target.files?.[0] ?? null)}
+          />
 
           <button type="submit" className="primary" disabled={!otcFile || loading}>
             {loading ? 'מעבד...' : 'המשך למיפוי שאלות'}
@@ -292,11 +339,11 @@ function App() {
         <section>
           <div className="results-header">
             <h2>הופקו {result.blocks.length} קבצים</h2>
-            <div>
+            <div className="results-actions">
               <button type="button" className="secondary" onClick={handleDownload}>
                 הורדת כל הקבצים (zip)
               </button>
-              <button type="button" className="secondary" onClick={handleReset} style={{ marginInlineStart: 8 }}>
+              <button type="button" className="secondary" onClick={handleReset}>
                 קובץ חדש
               </button>
             </div>
@@ -315,7 +362,7 @@ function App() {
               <summary>
                 <span className="block-title">
                   {block.question_name}
-                  <span className="type-badge">{TYPE_BADGE[block.type] || block.type}</span>
+                  <span className={`type-badge ${block.type}`}>{TYPE_BADGE[block.type] || block.type}</span>
                 </span>
                 <span className="block-meta">
                   {block.row_count} רשומות · {block.filename}
