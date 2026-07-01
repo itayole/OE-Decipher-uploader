@@ -21,6 +21,29 @@ function parseAbSuffix(name) {
   return { base: m[1], letter: m[2].toLowerCase() }
 }
 
+const DONT_KNOW_KEYWORDS = [
+  'לא מכיר',
+  'לא מכירה',
+  'לא מוכר',
+  'לא יודע',
+  'לא יודעת',
+  'אינני מכיר',
+  'איני מכיר',
+  'לא זוכר',
+  'לא זוכרת',
+  "don't know",
+  'dont know',
+  'not familiar',
+  'unfamiliar',
+]
+
+function guessDontKnowCode(categories) {
+  const match = categories.find((c) =>
+    DONT_KNOW_KEYWORDS.some((kw) => (c.label || '').toLowerCase().includes(kw))
+  )
+  return match ? match.code : null
+}
+
 const STEPS = [
   { key: 'upload', label: 'העלאה' },
   { key: 'mapping', label: 'מיפוי שאלות' },
@@ -133,7 +156,23 @@ function App() {
       const initialTypes = {}
       data.blocks.forEach((b) => (initialTypes[b.name] = b.suggested_type))
       setTypeByName(initialTypes)
-      setCleanCodeByBase({})
+
+      const blocksByNameTemp = {}
+      data.blocks.forEach((b) => (blocksByNameTemp[b.name] = b))
+      const initialCleanCodes = {}
+      data.blocks.forEach((b) => {
+        if (b.suggested_type !== 'ab' || b.role !== 'A' || !b.paired_with) return
+        const parsed = parseAbSuffix(b.name)
+        if (!parsed) return
+        const partner = blocksByNameTemp[b.paired_with]
+        const seen = new Map()
+        ;[...(b.categories || []), ...(partner?.categories || [])].forEach((c) => {
+          if (!seen.has(c.code)) seen.set(c.code, c)
+        })
+        const guess = guessDontKnowCode([...seen.values()])
+        if (guess) initialCleanCodes[parsed.base] = guess
+      })
+      setCleanCodeByBase(initialCleanCodes)
       setStep('mapping')
     } catch (err) {
       setError(err.message)
