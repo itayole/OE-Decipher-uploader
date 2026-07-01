@@ -562,9 +562,9 @@ function App() {
                   <span className={`type-badge ${block.type}`}>{TYPE_BADGE[block.type] || block.type}</span>
                 </span>
                 <span className="block-meta">
-                  {block.row_count != null && `${block.row_count} רשומות`}
-                  {block.answered_count != null && ` · ${block.answered_count} תשובות לא ריקות`}
-                  {block.row_count != null || block.answered_count != null ? ' · ' : ''}
+                  {block.category_count != null && `${block.category_count} קטגוריות קוד · `}
+                  {block.row_count != null && `${block.row_count} רשומות בסה"כ · `}
+                  {block.answered_count != null && `${block.answered_count} תשובות · `}
                   {block.filename}
                 </span>
               </summary>
