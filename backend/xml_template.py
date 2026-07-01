@@ -19,6 +19,9 @@ def write_default_template(content: str) -> None:
     DEFAULT_TEMPLATE_PATH.write_text(content, encoding="utf-8")
 
 
+DEFAULT_DELIMITER_LINE = "-" * 72
+
+
 def extract_template_block(template_text: str) -> str:
     """The template block lives between the first two delimiter lines
     (a line of 3+ dashes/em-dashes). Falls back to the whole file if
@@ -29,6 +32,15 @@ def extract_template_block(template_text: str) -> str:
         start, end = delimiter_indices[0], delimiter_indices[1]
         return "\n".join(lines[start + 1 : end])
     return template_text
+
+
+def extract_delimiter_line(template_text: str) -> str:
+    """The exact delimiter line text used in the template, so the same
+    style of separator can be reused between generated question blocks."""
+    for line in template_text.splitlines():
+        if DELIMITER_RE.match(line):
+            return line
+    return DEFAULT_DELIMITER_LINE
 
 
 def detect_placeholder(block: str) -> str | None:
@@ -90,5 +102,7 @@ def assemble_xml(template_text: str, question_entries: list[dict]) -> tuple[byte
         build_block_xml(block, placeholder, entry["name"], entry["code_count"], entry["categories"])
         for entry in question_entries
     ]
-    full_xml = ("\n\n".join(parts) + "\n").encode("utf-8")
+    delimiter = extract_delimiter_line(template_text)
+    separator = f"\n\n{delimiter}\n\n"
+    full_xml = (separator.join(parts) + "\n").encode("utf-8")
     return full_xml, warnings
