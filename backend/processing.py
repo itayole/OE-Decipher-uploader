@@ -119,6 +119,14 @@ def load_categories(wb) -> dict:
     return categories
 
 
+def _union_categories(*category_lists: list[dict]) -> list[dict]:
+    seen: dict = {}
+    for categories in category_lists:
+        for cat in categories:
+            seen.setdefault(cat["code"], cat)
+    return list(seen.values())
+
+
 _AB_SUFFIX_RE = re.compile(r"^(.*?)([ab])$", re.IGNORECASE)
 
 
@@ -189,7 +197,11 @@ def rows_to_dat_bytes(columns: list[str], rows: list[list]) -> bytes:
 
 def clean_ab_pair(ws, block_a: QuestionBlock, block_b: QuestionBlock, clean_code: str):
     """Applies the unaided-awareness (TOM / others) cleaning rules to a single
-    A/B pair, row by row. Returns (rows_a, rows_b, log_rows)."""
+    A/B pair, row by row, then re-exports the pair so that:
+      - block A keeps only its (cleaned) first code column — the TOM answer.
+      - block B holds every code column from both A and B, A's first (all of
+        A's cleaned columns, then all of B's), representing total awareness.
+    Returns ((columns_a, rows_a), (columns_b, rows_b), log_rows)."""
     max_row = ws.max_row
     clean_code = normalize(clean_code)
 
@@ -202,8 +214,9 @@ def clean_ab_pair(ws, block_a: QuestionBlock, block_b: QuestionBlock, clean_code
     def is_real(v):
         return not is_blank(v) and not is_clean(v)
 
-    columns_a = ["record", "uuid"] + [f"code{i+1}" for i in range(block_a.code_count)]
-    columns_b = ["record", "uuid"] + [f"code{i+1}" for i in range(block_b.code_count)]
+    total_code_count = block_a.code_count + block_b.code_count
+    columns_a = ["record", "uuid", "code1"]
+    columns_b = ["record", "uuid"] + [f"code{i+1}" for i in range(total_code_count)]
     rows_a, rows_b, log_rows = [], [], []
 
     for r in range(2, max_row + 1):
@@ -245,8 +258,10 @@ def clean_ab_pair(ws, block_a: QuestionBlock, block_b: QuestionBlock, clean_code
                         log("4", block_label, i, arr[i], None)
                         arr[i] = None
 
-        rows_a.append([record, uid] + a)
-        rows_b.append([record, uid] + b)
+        # Re-export: A keeps only its (cleaned) first column; B gets every
+        # column from both A and B, A's first.
+        rows_a.append([record, uid, a[0] if a else None])
+        rows_b.append([record, uid] + a + b)
 
     return (columns_a, rows_a), (columns_b, rows_b), log_rows
 
@@ -335,13 +350,17 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict], template_text: str 
         dat_files[fname_b] = rows_to_dat_bytes(cols_b, rows_b)
         dat_files[fname_log] = log_rows_to_bytes(log_rows)
 
+        categories_a = categories.get(block_a.name, [])
+        categories_b = categories.get(block_b.name, [])
+        categories_union = _union_categories(categories_a, categories_b)
+
         results.append(
             {
                 "question_name": block_a.name,
                 "type": BLOCK_TYPE_AB,
                 "role": "A",
-                "code_count": block_a.code_count,
-                "category_count": len(categories.get(block_a.name, [])),
+                "code_count": len(cols_a) - 2,
+                "category_count": len(categories_a),
                 "row_count": len(rows_a),
                 "answered_count": count_answered_rows(rows_a),
                 "filename": fname_a,
@@ -354,8 +373,8 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict], template_text: str 
                 "question_name": block_b.name,
                 "type": BLOCK_TYPE_AB,
                 "role": "B",
-                "code_count": block_b.code_count,
-                "category_count": len(categories.get(block_b.name, [])),
+                "code_count": len(cols_b) - 2,
+                "category_count": len(categories_union),
                 "row_count": len(rows_b),
                 "answered_count": count_answered_rows(rows_b),
                 "filename": fname_b,
@@ -381,15 +400,15 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict], template_text: str 
         xml_question_entries.append(
             {
                 "name": f"{block_a.name}_coded",
-                "code_count": block_a.code_count,
-                "categories": categories.get(block_a.name, []),
+                "code_count": len(cols_a) - 2,
+                "categories": categories_a,
             }
         )
         xml_question_entries.append(
             {
                 "name": f"{block_b.name}_coded",
-                "code_count": block_b.code_count,
-                "categories": categories.get(block_b.name, []),
+                "code_count": len(cols_b) - 2,
+                "categories": categories_union,
             }
         )
 
