@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { APP_VERSION, RELEASE_NOTES } from './releaseNotes'
 
@@ -20,11 +20,35 @@ const TYPE_BADGE = {
   xml: 'XML',
 }
 
-function UserGuide() {
+const GUIDE_DISMISSED_KEY = 'oeDecipherGuideDismissed'
+
+function HelpButton({ onClick }) {
   return (
-    <details className="guide-panel" open>
-      <summary>מדריך שימוש והסבר על האפליקציה</summary>
-      <div className="guide-body">
+    <button type="button" className="help-trigger" onClick={onClick}>
+      <span className="help-icon">?</span>
+      עזרה
+    </button>
+  )
+}
+
+function GuideModal({ onClose }) {
+  const [dontShowAgain, setDontShowAgain] = useState(false)
+
+  const handleClose = () => {
+    if (dontShowAgain) localStorage.setItem(GUIDE_DISMISSED_KEY, '1')
+    onClose()
+  }
+
+  return (
+    <div className="modal-overlay" onClick={handleClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>מדריך שימוש והסבר על האפליקציה</h2>
+          <button type="button" className="modal-close" onClick={handleClose} aria-label="סגירה">
+            ×
+          </button>
+        </div>
+        <div className="modal-body guide-body">
         <section>
           <h3>מה האפליקציה עושה</h3>
           <p>
@@ -89,8 +113,22 @@ function UserGuide() {
             במסך "מיפוי שאלות".
           </p>
         </section>
+        </div>
+        <div className="modal-footer">
+          <label className="dont-show-again">
+            <input
+              type="checkbox"
+              checked={dontShowAgain}
+              onChange={(e) => setDontShowAgain(e.target.checked)}
+            />
+            אל תראה שנית
+          </label>
+          <button type="button" className="primary" onClick={handleClose}>
+            הבנתי
+          </button>
+        </div>
       </div>
-    </details>
+    </div>
   )
 }
 
@@ -243,6 +281,12 @@ function App() {
   const [templateUpdateFile, setTemplateUpdateFile] = useState(null)
   const [templateStatus, setTemplateStatus] = useState(null) // {type: 'success'|'error', message}
   const [templateUpdating, setTemplateUpdating] = useState(false)
+
+  const [showGuide, setShowGuide] = useState(false)
+
+  useEffect(() => {
+    if (!localStorage.getItem(GUIDE_DISMISSED_KEY)) setShowGuide(true)
+  }, [])
 
   const blocksByName = useMemo(() => {
     const map = {}
@@ -398,6 +442,9 @@ function App() {
 
   return (
     <>
+      <HelpButton onClick={() => setShowGuide(true)} />
+      {showGuide && <GuideModal onClose={() => setShowGuide(false)} />}
+
       <header className="app-header">
         <div className="app-header-row">
           <span className="brand-mark">OE</span>
@@ -409,8 +456,6 @@ function App() {
       </header>
 
       <StepIndicator step={step} onStepClick={handleStepClick} />
-
-      {step === 'upload' && <UserGuide />}
 
       {step === 'upload' && (
         <form className="upload-card" onSubmit={handleUpload}>
