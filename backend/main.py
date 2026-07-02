@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from processing import detect_and_describe, generate_outputs, zip_dat_files
 from xml_template import extract_template_block, read_default_template, write_default_template
 
-app = FastAPI(title="OE Decipher Uploader", version="0.3.0")
+app = FastAPI(title="OE Decipher Uploader", version="0.4.0")
 
 # job_id -> {"file_bytes": bytes, "dat_files": {filename: bytes} | None}
 JOBS: dict[str, dict] = {}
