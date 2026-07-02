@@ -2,6 +2,10 @@ import { Fragment, useMemo, useState } from 'react'
 import './App.css'
 import { APP_VERSION, RELEASE_NOTES } from './releaseNotes'
 
+// import.meta.env.BASE_URL is '/' in dev and '/oe-decipher/' in the production
+// build (see vite.config.js) — always ends with a trailing slash.
+const API_BASE = `${import.meta.env.BASE_URL}api`
+
 const TYPE_LABELS = {
   regular: 'רגילה',
   ab: 'AB — מודעות ספונטנית (TOM/אחרים)',
@@ -275,7 +279,7 @@ function App() {
     formData.append('otc_file', otcFile)
 
     try {
-      const res = await fetch('/api/upload', { method: 'POST', body: formData })
+      const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'שגיאה בעיבוד הקובץ')
       setJobId(data.job_id)
@@ -332,7 +336,7 @@ function App() {
     }
 
     try {
-      const res = await fetch('/api/generate', { method: 'POST', body: formData })
+      const res = await fetch(`${API_BASE}/generate`, { method: 'POST', body: formData })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'שגיאה בהפקת הקבצים')
       setResult(data)
@@ -345,7 +349,7 @@ function App() {
   }
 
   const handleDownloadTemplate = () => {
-    window.location.href = '/api/xml-template'
+    window.location.href = `${API_BASE}/xml-template`
   }
 
   const handleUpdateTemplate = async () => {
@@ -355,7 +359,7 @@ function App() {
     const formData = new FormData()
     formData.append('template_file', templateUpdateFile)
     try {
-      const res = await fetch('/api/xml-template', { method: 'POST', body: formData })
+      const res = await fetch(`${API_BASE}/xml-template`, { method: 'POST', body: formData })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'שגיאה בעדכון התבנית')
       setTemplateStatus({ type: 'success', message: 'תבנית ברירת המחדל עודכנה בהצלחה' })
@@ -368,7 +372,7 @@ function App() {
   }
 
   const handleDownload = () => {
-    if (jobId) window.location.href = `/api/download/${jobId}`
+    if (jobId) window.location.href = `${API_BASE}/download/${jobId}`
   }
 
   const handleReset = () => {
