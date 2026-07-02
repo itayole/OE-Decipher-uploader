@@ -129,6 +129,41 @@ def _union_categories(*category_lists: list[dict]) -> list[dict]:
 
 _AB_SUFFIX_RE = re.compile(r"^(.*?)([ab])$", re.IGNORECASE)
 
+# Raw Decipher data-file column naming: q{question}r{answer}oe holds the free-text
+# "other" answer, q{question}r{answer} holds the closed 0/1 answers.
+_OE_COL_RE = re.compile(r"^q(\d+)r(\d+)oe$", re.IGNORECASE)
+_R_COL_RE = re.compile(r"^q(\d+)r(\d+)$", re.IGNORECASE)
+# OTC block name for a closed+other question is usually the bare question number
+# (e.g. "q7"), but some OTC files name the block after the raw "oe" column instead
+# -- either the short form ("q7oe") or the full raw-file column name ("q7r6oe").
+# Either "oe" form is a strong signal the question is closed+other.
+_BLOCK_QNUM_RE = re.compile(r"^q(\d+)$", re.IGNORECASE)
+_BLOCK_QNUM_OE_RE = re.compile(r"^q(\d+)oe$", re.IGNORECASE)
+
+
+def extract_block_qnum(name: str) -> tuple[str | None, bool]:
+    """Returns (question_number, name_indicates_closed_others) for an OTC block
+    name, matching the bare "qN", the short "qNoe", or the full "qNrMoe" (the
+    raw file's own column name) naming convention."""
+    m = _OE_COL_RE.match(name)
+    if m:
+        return m.group(1), True
+    m = _BLOCK_QNUM_OE_RE.match(name)
+    if m:
+        return m.group(1), True
+    m = _BLOCK_QNUM_RE.match(name)
+    if m:
+        return m.group(1), False
+    return None, False
+
+
+def display_question_name(name: str) -> str:
+    """A trailing "oe" always marks the open-text part of a question, not a
+    question in its own right -- "q7oe" is the same question as "q7", so it
+    should always be labeled/exported as "q7"."""
+    qnum, name_says_closed_others = extract_block_qnum(name)
+    return f"q{qnum}" if name_says_closed_others else name
+
 
 def suggest_ab_pairs(blocks: list[QuestionBlock]) -> dict:
     """Returns {block_name: {"base": str, "role": "A"|"B", "paired_with": str}}
@@ -275,7 +310,97 @@ def log_rows_to_bytes(log_rows: list[list]) -> bytes:
     return ("\r\n".join(lines) + "\r\n").encode("utf-8")
 
 
-def detect_and_describe(file_bytes: bytes) -> dict:
+def parse_raw_data_file(file_bytes: bytes) -> dict:
+    """Parses the optional raw Decipher data export. Identifies "closed+other"
+    questions via q{N}r{M}oe columns, and collects the surviving "closed
+    answer" columns for each such question (0/blank -> blank, 1 -> the answer
+    number M from the column's own name -- e.g. a "1" in q7r3 becomes 3 --
+    the r{M} column that matches the oe column's answer number removed).
+    Returns:
+      {"questions": {qnum: [closed column names, in file order]},
+       "rows_by_uuid": {uuid: {col_name: value}},
+       "rows_by_record": {record: {col_name: value}}}
+    """
+    wb = load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    rows_iter = ws.iter_rows(values_only=True)
+    header = list(next(rows_iter))
+    header_index = {str(h).strip(): i for i, h in enumerate(header) if h is not None}
+
+    record_idx = header_index.get("record")
+    uuid_idx = header_index.get("uuid")
+    if record_idx is None and uuid_idx is None:
+        raise ValueError("קובץ הנתונים חייב לכלול עמודת 'record' או 'uuid'")
+
+    oe_answer_nums_by_question: dict[str, set] = {}
+    for name in header_index:
+        m = _OE_COL_RE.match(name)
+        if m:
+            oe_answer_nums_by_question.setdefault(m.group(1), set()).add(m.group(2))
+
+    questions: dict[str, list[str]] = {}
+    col_to_rnum: dict[str, int] = {}
+    for name in header_index:
+        m = _R_COL_RE.match(name)
+        if not m:
+            continue
+        qnum, rnum = m.group(1), m.group(2)
+        if qnum not in oe_answer_nums_by_question:
+            continue
+        if rnum in oe_answer_nums_by_question[qnum]:
+            continue
+        questions.setdefault(qnum, []).append(name)
+        col_to_rnum[name] = int(rnum)
+
+    for qnum, cols in questions.items():
+        cols.sort(key=lambda n: header_index[n])
+
+    keep_columns = sorted({c for cols in questions.values() for c in cols}, key=lambda n: header_index[n])
+    keep_indices = [header_index[c] for c in keep_columns]
+
+    rows_by_uuid: dict = {}
+    rows_by_record: dict = {}
+    all_rows: list = []
+    for row in rows_iter:
+        record_raw = row[record_idx] if record_idx is not None else None
+        uid_raw = row[uuid_idx] if uuid_idx is not None else None
+        record = normalize(record_raw)
+        uid = normalize(uid_raw)
+        values = {}
+        for col, idx in zip(keep_columns, keep_indices):
+            v = row[idx] if idx < len(row) else None
+            values[col] = None if normalize(v) in (None, "0") else col_to_rnum[col]
+        if uid is not None:
+            rows_by_uuid[uid] = values
+        if record is not None:
+            rows_by_record[record] = values
+        all_rows.append((record_raw, uid_raw, values))
+
+    return {
+        "questions": questions,
+        "rows_by_uuid": rows_by_uuid,
+        "rows_by_record": rows_by_record,
+        "all_rows": all_rows,
+    }
+
+
+def _otc_block_lookup(ws, block: QuestionBlock) -> tuple[dict, dict]:
+    """Indexes an OTC block's coded columns by respondent, for joining onto
+    another row set (the raw data file's full respondent list)."""
+    by_uuid: dict = {}
+    by_record: dict = {}
+    for r in range(2, ws.max_row + 1):
+        record = normalize(ws.cell(row=r, column=1).value)
+        uid = normalize(ws.cell(row=r, column=2).value)
+        codes = [ws.cell(row=r, column=c).value for c in block.code_col_indices]
+        if uid is not None:
+            by_uuid[uid] = codes
+        if record is not None:
+            by_record[record] = codes
+    return by_uuid, by_record
+
+
+def detect_and_describe(file_bytes: bytes, raw_file_bytes: bytes | None = None) -> dict:
     """Step 1: parse the workbook and return blocks with suggested types and
     their category dictionaries, for the mapping-confirmation screen."""
     wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
@@ -283,25 +408,42 @@ def detect_and_describe(file_bytes: bytes) -> dict:
     blocks = [b for b in detect_blocks(ws) if b.code_count > 0]
     categories = load_categories(wb)
     ab_suggestions = suggest_ab_pairs(blocks)
+    raw_data = parse_raw_data_file(raw_file_bytes) if raw_file_bytes else None
 
     results = []
     for block in blocks:
         suggestion = ab_suggestions.get(block.name)
+        qnum, name_says_closed_others = extract_block_qnum(block.name)
+        closed_others_available = bool(raw_data is not None and qnum and qnum in raw_data["questions"])
+        if suggestion:
+            suggested_type = BLOCK_TYPE_AB
+        elif closed_others_available or name_says_closed_others:
+            suggested_type = BLOCK_TYPE_CLOSED_OTHERS
+        else:
+            suggested_type = BLOCK_TYPE_REGULAR
         results.append(
             {
                 "name": block.name,
+                "display_name": f"q{qnum}" if name_says_closed_others else block.name,
                 "code_count": block.code_count,
                 "answered_count": count_answered(ws, block),
-                "suggested_type": BLOCK_TYPE_AB if suggestion else BLOCK_TYPE_REGULAR,
+                "suggested_type": suggested_type,
                 "paired_with": suggestion["paired_with"] if suggestion else None,
                 "role": suggestion["role"] if suggestion else None,
                 "categories": categories.get(block.name, []),
+                "closed_others_available": closed_others_available,
             }
         )
+
     return {"blocks": results}
 
 
-def generate_outputs(file_bytes: bytes, mapping: list[dict], template_text: str | None = None) -> dict:
+def generate_outputs(
+    file_bytes: bytes,
+    mapping: list[dict],
+    template_text: str | None = None,
+    raw_file_bytes: bytes | None = None,
+) -> dict:
     """Step 2: apply the confirmed type mapping and produce the .dat / log /
     XML files. `mapping` is a list of {name, type, cleaned_code?}."""
     wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
@@ -309,6 +451,7 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict], template_text: str 
     blocks = {b.name: b for b in detect_blocks(ws) if b.code_count > 0}
     mapping_by_name = {m["name"]: m for m in mapping if m["name"] in blocks}
     categories = load_categories(wb)
+    raw_data = parse_raw_data_file(raw_file_bytes) if raw_file_bytes else None
 
     results = []
     dat_files = {}
@@ -412,16 +555,99 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict], template_text: str 
             }
         )
 
+    closed_others_entries = [m for m in mapping_by_name.values() if m.get("type") == BLOCK_TYPE_CLOSED_OTHERS]
+
+    # Group by resolved display name first -- more than one OTC block can
+    # belong to the same underlying question (e.g. two separate "other"
+    # slots, q15r6oe and q15r9oe, both belong to question 15) and must be
+    # merged into a single export, not each produce a competing duplicate
+    # "q15_coded" file/XML block.
+    closed_others_groups: dict[str, list[dict]] = {}
+    for entry in closed_others_entries:
+        name = entry["name"]
+        if name in handled or name not in blocks:
+            continue
+        qnum, _ = extract_block_qnum(name)
+        display_name = display_question_name(name)
+        closed_others_groups.setdefault(display_name, []).append(
+            {"name": name, "qnum": qnum, "block": blocks[name]}
+        )
+
+    for display_name, group_entries in closed_others_groups.items():
+        qnum = group_entries[0]["qnum"]
+
+        if raw_data is None:
+            warnings.append(f"{display_name}: לא נטען קובץ נתונים גולמי — השאלה תטופל כשאלה רגילה")
+            continue
+        if not qnum:
+            warnings.append(
+                f"{display_name}: שם השאלה אינו בפורמט qN או qNoe, לא ניתן להתאים לקובץ הנתונים — תטופל כשאלה רגילה"
+            )
+            continue
+        if qnum not in raw_data["questions"]:
+            warnings.append(
+                f"{display_name}: לא נמצאה קבוצת עמודות 'סגורה+אחר' תואמת (q{qnum}r..oe) בקובץ הנתונים — תטופל כשאלה רגילה"
+            )
+            continue
+
+        closed_columns = raw_data["questions"].get(qnum, [])
+        otc_lookups = [(_otc_block_lookup(ws, e["block"]), e["block"]) for e in group_entries]
+        otc_code_count = sum(e["block"].code_count for e in group_entries)
+        total_code_count = len(closed_columns) + otc_code_count
+        columns = ["record", "uuid"] + [f"code{i+1}" for i in range(total_code_count)]
+
+        rows = []
+        for record, uid, values in raw_data["all_rows"]:
+            closed_values = [values.get(c) for c in closed_columns]
+            all_codes = []
+            for (otc_by_uuid, otc_by_record), block in otc_lookups:
+                codes = otc_by_uuid.get(normalize(uid))
+                if codes is None:
+                    codes = otc_by_record.get(normalize(record))
+                if codes is None:
+                    codes = [None] * block.code_count
+                all_codes.extend(codes)
+            rows.append([record, uid] + closed_values + all_codes)
+
+        filename = f"{display_name}_coded.dat"
+        dat_files[filename] = rows_to_dat_bytes(columns, rows)
+        combined_categories = _union_categories(*(categories.get(e["block"].name, []) for e in group_entries))
+        results.append(
+            {
+                "question_name": display_name,
+                "type": BLOCK_TYPE_CLOSED_OTHERS,
+                "role": None,
+                "code_count": len(columns) - 2,
+                "category_count": len(combined_categories),
+                "row_count": len(rows),
+                "answered_count": count_answered_rows(rows),
+                "filename": filename,
+                "columns": columns,
+                "preview_rows": rows[:20],
+            }
+        )
+        for e in group_entries:
+            handled.add(e["name"])
+        xml_question_entries.append(
+            {
+                "name": f"{display_name}_coded",
+                "code_count": otc_code_count,
+                "code_offset": len(closed_columns),
+                "categories": combined_categories,
+            }
+        )
+
     for name, block in blocks.items():
         if name in handled:
             continue
+        display_name = display_question_name(name)
         columns, rows = build_block_rows(ws, block)
-        filename = f"{block.name}_coded.dat"
+        filename = f"{display_name}_coded.dat"
         dat_files[filename] = rows_to_dat_bytes(columns, rows)
         entry = mapping_by_name.get(name, {})
         results.append(
             {
-                "question_name": block.name,
+                "question_name": display_name,
                 "type": entry.get("type", BLOCK_TYPE_REGULAR),
                 "role": None,
                 "code_count": block.code_count,
@@ -435,7 +661,7 @@ def generate_outputs(file_bytes: bytes, mapping: list[dict], template_text: str 
         )
         xml_question_entries.append(
             {
-                "name": f"{block.name}_coded",
+                "name": f"{display_name}_coded",
                 "code_count": block.code_count,
                 "categories": categories.get(block.name, []),
             }

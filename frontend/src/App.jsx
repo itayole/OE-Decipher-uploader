@@ -64,7 +64,9 @@ function GuideModal({ onClose }) {
           <ol>
             <li>
               <strong>העלאה</strong> — העלו את קובץ ה-OTC (חייב לכלול את הגיליונות "קידוד" ו-
-              "קטגוריות"). ניתן לגרור את הקובץ לתיבה או ללחוץ ולבחור אותו.
+              "קטגוריות"). ניתן לגרור את הקובץ לתיבה או ללחוץ ולבחור אותו. ניתן להעלות כאן גם
+              (אופציונלית) את קובץ הנתונים הגולמי מ-Decipher — נדרש רק אם יש שאלות מסוג
+              "סגורה + אחר" בשאלון.
             </li>
             <li>
               <strong>מיפוי שאלות</strong> — האפליקציה מזהה אוטומטית את בלוקי השאלות הפתוחות
@@ -95,8 +97,14 @@ function GuideModal({ onClose }) {
               מודעות), אחת אחרי השנייה. כל שינוי בניקוי נרשם בקובץ לוג נפרד לכל זוג.
             </li>
             <li>
-              <strong>סגורה + אחר</strong> — שאלה סגורה עם אפשרות "אחר, פרט/י" בטקסט חופשי.
-              הטיפול הייעודי בסוג זה עדיין לא מומש; בשלב זה היא מטופלת כמו שאלה רגילה.
+              <strong>סגורה + אחר</strong> — שאלה סגורה (בדרך כלל מרובת-ברירה) עם אפשרות
+              "אחר, פרט/י" בטקסט חופשי (למשל q7r6, שתשובת הטקסט החופשי שלה מופיעה בעמודה
+              q7r6oe בקובץ הנתונים הגולמי). כדי לטפל בשאלות מסוג זה חובה להעלות גם את קובץ
+              הנתונים הגולמי מ-Decipher בשלב ההעלאה — ללא קובץ נתונים תואם, האפשרות אינה
+              זמינה לבחירה. האפליקציה מזהה בקובץ הנתונים את עמודות התשובות הסגורות של השאלה,
+              מסירה מהן את עמודת ה"אחר" (המקבילה לעמודת ה-oe), ומאחדת אותן עם עמודות הקוד
+              שהופקו מקובץ ה-OTC לקובץ .dat אחד — כך שכל תשובה (סגורה או פתוחה שקודדה)
+              מופיעה כעמודת code נפרדת עבור כל משיב.
             </li>
           </ul>
         </section>
@@ -323,6 +331,9 @@ function App() {
 
     const formData = new FormData()
     formData.append('otc_file', otcFile)
+    if (rawFile) {
+      formData.append('raw_data_file', rawFile)
+    }
 
     try {
       const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData })
@@ -424,6 +435,7 @@ function App() {
   const handleReset = () => {
     setStep('upload')
     setOtcFile(null)
+    setRawFile(null)
     setJobId(null)
     setBlocks([])
     setTypeByName({})
@@ -470,9 +482,8 @@ function App() {
 
           <DropzoneInput
             label="קובץ נתונים גולמי מ-Decipher (xlsx)"
-            hint="אופציונלי — עדיין לא בשימוש בשלב זה"
+            hint="אופציונלי — נדרש לטיפול בשאלות מסוג 'סגורה + אחר'"
             file={rawFile}
-            disabled
             onFile={(f) => setRawFile(f ?? null)}
           />
 
@@ -525,7 +536,7 @@ function App() {
               return (
                 <div className="mapping-row" key={block.name}>
                   <div className="mapping-row-main">
-                    <span className="mapping-name">{block.name}</span>
+                    <span className="mapping-name">{block.display_name || block.name}</span>
                     <span className="block-meta">
                       {block.code_count} עמודות קוד · {block.answered_count} תשובות לא ריקות
                     </span>
@@ -535,17 +546,29 @@ function App() {
                         setTypeByName((prev) => ({ ...prev, [block.name]: e.target.value }))
                       }
                     >
-                      {Object.entries(TYPE_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
+                      {Object.entries(TYPE_LABELS).map(([value, label]) => {
+                        const closedOthersBlocked = value === 'closed_others' && !rawFile
+                        const title = closedOthersBlocked
+                          ? "לצורך טיפול בשאלות אלו חובה לטעון קובץ נתונים בשלב ההעלאה"
+                          : undefined
+                        return (
+                          <option key={value} value={value} disabled={closedOthersBlocked} title={title}>
+                            {label}
+                          </option>
+                        )
+                      })}
                     </select>
                   </div>
 
                   {type === 'ab' && !isPaired && (
                     <div className="mapping-warning">
                       לא נמצא זוג מתאים (שם עם סיומת a/b תואמת) — השאלה תטופל כרגילה
+                    </div>
+                  )}
+
+                  {type === 'closed_others' && block.closed_others_available === false && (
+                    <div className="mapping-warning">
+                      לא נמצאה בקובץ הנתונים קבוצת עמודות "סגורה + אחר" תואמת לשאלה זו — השאלה תטופל כרגילה
                     </div>
                   )}
 

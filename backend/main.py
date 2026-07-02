@@ -16,13 +16,23 @@ JOBS: dict[str, dict] = {}
 
 
 @app.post("/api/upload")
-async def upload(otc_file: UploadFile = File(...)):
+async def upload(
+    otc_file: UploadFile = File(...),
+    raw_data_file: UploadFile | None = File(None),
+):
     if not otc_file.filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(400, "Please upload an .xlsx file")
 
     file_bytes = await otc_file.read()
+
+    raw_file_bytes = None
+    if raw_data_file is not None and raw_data_file.filename:
+        if not raw_data_file.filename.lower().endswith((".xlsx", ".xlsm")):
+            raise HTTPException(400, "קובץ הנתונים הגולמי חייב להיות מסוג xlsx")
+        raw_file_bytes = await raw_data_file.read()
+
     try:
-        description = detect_and_describe(file_bytes)
+        description = detect_and_describe(file_bytes, raw_file_bytes)
     except Exception as exc:
         raise HTTPException(400, f"Failed to process file: {exc}") from exc
 
@@ -30,7 +40,7 @@ async def upload(otc_file: UploadFile = File(...)):
         raise HTTPException(400, "No question blocks with coded answers were detected")
 
     job_id = uuid.uuid4().hex
-    JOBS[job_id] = {"file_bytes": file_bytes, "dat_files": None}
+    JOBS[job_id] = {"file_bytes": file_bytes, "raw_file_bytes": raw_file_bytes, "dat_files": None}
 
     return {"job_id": job_id, "blocks": description["blocks"]}
 
@@ -56,7 +66,12 @@ async def generate(
         template_text = template_bytes.decode("utf-8")
 
     try:
-        result = generate_outputs(job["file_bytes"], mapping_list, template_text=template_text)
+        result = generate_outputs(
+            job["file_bytes"],
+            mapping_list,
+            template_text=template_text,
+            raw_file_bytes=job.get("raw_file_bytes"),
+        )
     except Exception as exc:
         raise HTTPException(400, f"Failed to generate output: {exc}") from exc
 

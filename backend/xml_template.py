@@ -8,6 +8,8 @@ PLACEHOLDER_RE = re.compile(r'(\w+)\s*=\s*File\(\s*"\1\.dat"\s*,\s*"record"\s*\)
 TITLE_RE = re.compile(r"<title>.*?</title>", re.DOTALL)
 ROW_RE = re.compile(r'^(?P<indent>[ \t]*)<row label="r(?P<num>\d+)">(?P<val>.*?)</row>\s*$')
 CODE_SLOT_RE = re.compile(r"(?i)^code\d+$")
+CHECKBOX_BLOCK_RE = re.compile(r"<checkbox\b.*?</checkbox>", re.DOTALL | re.IGNORECASE)
+VIRTUAL_BLOCK_RE = re.compile(r"<virtual>.*?</virtual>", re.DOTALL)
 
 
 def read_default_template() -> str:
@@ -86,8 +88,46 @@ def build_block_xml(template_block: str, placeholder: str, new_name: str, code_c
     return text.strip("\n")
 
 
+def build_closed_others_block(
+    template_block: str, placeholder: str, new_name: str, code_offset: int, code_count: int, categories: list[dict]
+) -> str:
+    """A closed+other question's .dat file holds the closed answers first,
+    then the OTC-coded ("other, specify") answers -- so its XML should
+    describe only the real, OTC-driven categories (matching what a regular
+    question would produce), not a generic code1..codeN placeholder block
+    sized to the merged file. Emits a single self-contained <checkbox> block
+    (no separate loader variable) whose virtual script reads the OTC-coded
+    slice of the .dat file directly, at its offset within the merged row."""
+    text = template_block.replace(placeholder, new_name)
+    match = CHECKBOX_BLOCK_RE.search(text)
+    if not match:
+        # Template doesn't have a recognizable checkbox block -- fall back to
+        # the regular two-part rendering rather than producing nothing.
+        return build_block_xml(template_block, placeholder, new_name, code_offset + code_count, categories)
+
+    checkbox_block = match.group(0)
+    checkbox_block = TITLE_RE.sub(f"<title>v{new_name} Coded Data</title>", checkbox_block)
+    checkbox_block = _regenerate_rows(checkbox_block, code_count, categories)
+    new_virtual = (
+        "<virtual>\n"
+        f"respData = {new_name}.get(record)\n"
+        "if respData:\n"
+        f"    for i in range(1, {code_count + 1}):\n"
+        f'        val = respData["code" + str({code_offset} + i)].strip("\\r\\n")\n'
+        "        if val:\n"
+        '            data.attr("r" + val).val = 1\n'
+        "  </virtual>"
+    )
+    checkbox_block = VIRTUAL_BLOCK_RE.sub(lambda _m: new_virtual, checkbox_block, count=1)
+    exec_block = f'<exec when="virtualInit">\n{new_name} = File("{new_name}.dat","record")\n</exec>'
+    return f"{exec_block}\n\n{checkbox_block}".strip("\n")
+
+
 def assemble_xml(template_text: str, question_entries: list[dict]) -> tuple[bytes | None, list[str]]:
-    """question_entries: [{"name": "q5a_coded", "code_count": 4, "categories": [...]}]"""
+    """question_entries: [{"name": "q5a_coded", "code_count": 4, "categories": [...]}].
+    An entry with "code_offset" set is a closed+other question -- rendered as
+    a single real-labels-only block via build_closed_others_block instead of
+    the regular two-part template."""
     warnings = []
     block = extract_template_block(template_text)
     placeholder = detect_placeholder(block)
@@ -98,10 +138,16 @@ def assemble_xml(template_text: str, question_entries: list[dict]) -> tuple[byte
         )
         return None, warnings
 
-    parts = [
-        build_block_xml(block, placeholder, entry["name"], entry["code_count"], entry["categories"])
-        for entry in question_entries
-    ]
+    parts = []
+    for entry in question_entries:
+        if entry.get("code_offset") is not None:
+            parts.append(
+                build_closed_others_block(
+                    block, placeholder, entry["name"], entry["code_offset"], entry["code_count"], entry["categories"]
+                )
+            )
+        else:
+            parts.append(build_block_xml(block, placeholder, entry["name"], entry["code_count"], entry["categories"]))
     delimiter = extract_delimiter_line(template_text)
     separator = f"\n\n{delimiter}\n\n"
     full_xml = (separator.join(parts) + "\n").encode("utf-8")
