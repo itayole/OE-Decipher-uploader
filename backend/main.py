@@ -17,7 +17,7 @@ from xml_template import extract_template_block, read_default_template, write_de
 
 RAW_FILE_EXTENSIONS = {".xlsx": RAW_FILE_KIND_EXCEL, ".xlsm": RAW_FILE_KIND_EXCEL, ".sav": RAW_FILE_KIND_SPSS}
 
-app = FastAPI(title="OE Decipher Uploader", version="0.4.0")
+app = FastAPI(title="OE Decipher Uploader", version="0.5.0")
 
 # job_id -> {"file_bytes": bytes, "dat_files": {filename: bytes} | None}
 JOBS: dict[str, dict] = {}
