@@ -63,10 +63,12 @@ function GuideModal({ onClose }) {
           <h3>שלבי העבודה</h3>
           <ol>
             <li>
-              <strong>העלאה</strong> — העלו את קובץ ה-OTC (חייב לכלול את הגיליונות "קידוד" ו-
-              "קטגוריות"). ניתן לגרור את הקובץ לתיבה או ללחוץ ולבחור אותו. ניתן להעלות כאן גם
-              (אופציונלית) את קובץ הנתונים הגולמי מ-Decipher — נדרש רק אם יש שאלות מסוג
-              "סגורה + אחר" בשאלון.
+              <strong>העלאה</strong> — העלו את קובץ ה-OTC (קובץ xlsx, חייב לכלול את הגיליונות
+              "קידוד" ו-"קטגוריות") ואת קובץ הנתונים הגולמי מ-Decipher — כקובץ xlsx (חייב לכלול
+              גיליון "Datamap") או כקובץ SPSS‏ (sav, כולל תוויות משתנים וערכים). שני הקבצים
+              חובה. ניתן לגרור כל קובץ לתיבה שלו או ללחוץ ולבחור אותו. קובץ הנתונים הגולמי נדרש
+              הן לטיפול בשאלות מסוג "סגורה + אחר" והן לתיוג כל שאלה בייצוא ה-XML בשם השאלה
+              האמיתי.
             </li>
             <li>
               <strong>מיפוי שאלות</strong> — האפליקציה מזהה אוטומטית את בלוקי השאלות הפתוחות
@@ -99,12 +101,10 @@ function GuideModal({ onClose }) {
             <li>
               <strong>סגורה + אחר</strong> — שאלה סגורה (בדרך כלל מרובת-ברירה) עם אפשרות
               "אחר, פרט/י" בטקסט חופשי (למשל q7r6, שתשובת הטקסט החופשי שלה מופיעה בעמודה
-              q7r6oe בקובץ הנתונים הגולמי). כדי לטפל בשאלות מסוג זה חובה להעלות גם את קובץ
-              הנתונים הגולמי מ-Decipher בשלב ההעלאה — ללא קובץ נתונים תואם, האפשרות אינה
-              זמינה לבחירה. האפליקציה מזהה בקובץ הנתונים את עמודות התשובות הסגורות של השאלה,
-              מסירה מהן את עמודת ה"אחר" (המקבילה לעמודת ה-oe), ומאחדת אותן עם עמודות הקוד
-              שהופקו מקובץ ה-OTC לקובץ .dat אחד — כך שכל תשובה (סגורה או פתוחה שקודדה)
-              מופיעה כעמודת code נפרדת עבור כל משיב.
+              q7r6oe בקובץ הנתונים הגולמי). האפליקציה מזהה בקובץ הנתונים את עמודות התשובות
+              הסגורות של השאלה, מסירה מהן את עמודת ה"אחר" (המקבילה לעמודת ה-oe), ומאחדת אותן
+              עם עמודות הקוד שהופקו מקובץ ה-OTC לקובץ .dat אחד — כך שכל תשובה (סגורה או פתוחה
+              שקודדה) מופיעה כעמודת code נפרדת עבור כל משיב.
             </li>
           </ul>
         </section>
@@ -113,9 +113,11 @@ function GuideModal({ onClose }) {
           <h3>קובץ ה-XML</h3>
           <p>
             בנוסף לקבצי ה-.dat, מופק קובץ XML אחד (survey_openends.xml) המכיל עבור כל שאלה את
-            תכנות ה-Decipher המתאימה — כולל שם המשתנה, כותרות ורשימת הקטגוריות מתוך גיליון
-            "קטגוריות". הקובץ אינו XML תקין כמסמך שלם (יש בכוונה שורת הפרדה בין השאלות) — יש
-            להעתיק ידנית את הבלוק המתאים לכל שאלה לתוך תכנות השאלון עצמו.
+            תכנות ה-Decipher המתאימה — כולל שם המשתנה, כותרת עם שם השאלה האמיתי (מתוך גיליון
+            ה-Datamap בקובץ נתונים מסוג xlsx, או מתוך תוויות המשתנים בקובץ נתונים מסוג sav)
+            ורשימת הקטגוריות מתוך גיליון "קטגוריות". הקובץ אינו XML תקין כמסמך שלם (יש בכוונה
+            שורת הפרדה בין השאלות) — יש להעתיק ידנית את הבלוק המתאים לכל שאלה לתוך תכנות השאלון
+            עצמו.
           </p>
           <p>
             הקובץ נבנה מתוך תבנית קבועה שנשמרת בשרת. ניתן להחליף את התבנית הקבועה (תשפיע על כל
@@ -217,7 +219,7 @@ function StepIndicator({ step, onStepClick }) {
   )
 }
 
-function DropzoneInput({ label, hint, file, disabled, onFile }) {
+function DropzoneInput({ label, hint, file, disabled, onFile, accept = '.xlsx,.xlsm', prompt = 'לחצו לבחירת קובץ xlsx או גררו אותו לכאן' }) {
   const [isDragging, setIsDragging] = useState(false)
 
   const handleDragOver = (e) => {
@@ -259,12 +261,12 @@ function DropzoneInput({ label, hint, file, disabled, onFile }) {
           ) : disabled ? (
             'לא זמין בשלב זה'
           ) : (
-            'לחצו לבחירת קובץ xlsx או גררו אותו לכאן'
+            prompt
           )}
         </span>
         <input
           type="file"
-          accept=".xlsx,.xlsm"
+          accept={accept}
           disabled={disabled}
           onChange={(e) => onFile(e.target.files?.[0] ?? null)}
         />
@@ -325,15 +327,13 @@ function App() {
 
   const handleUpload = async (e) => {
     e.preventDefault()
-    if (!otcFile) return
+    if (!otcFile || !rawFile) return
     setLoading(true)
     setError(null)
 
     const formData = new FormData()
     formData.append('otc_file', otcFile)
-    if (rawFile) {
-      formData.append('raw_data_file', rawFile)
-    }
+    formData.append('raw_data_file', rawFile)
 
     try {
       const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData })
@@ -481,13 +481,15 @@ function App() {
           />
 
           <DropzoneInput
-            label="קובץ נתונים גולמי מ-Decipher (xlsx)"
-            hint="אופציונלי — נדרש לטיפול בשאלות מסוג 'סגורה + אחר'"
+            label="קובץ נתונים גולמי מ-Decipher (xlsx או sav)"
+            hint="חובה — נדרש לטיפול בשאלות מסוג 'סגורה + אחר' ולתוויות השאלות בייצוא ה-XML"
             file={rawFile}
             onFile={(f) => setRawFile(f ?? null)}
+            accept=".xlsx,.xlsm,.sav"
+            prompt="לחצו לבחירת קובץ xlsx או sav, או גררו אותו לכאן"
           />
 
-          <button type="submit" className="primary" disabled={!otcFile || loading}>
+          <button type="submit" className="primary" disabled={!otcFile || !rawFile || loading}>
             {loading ? 'מעבד...' : 'המשך למיפוי שאלות'}
           </button>
         </form>

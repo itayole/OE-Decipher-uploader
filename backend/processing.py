@@ -1,19 +1,27 @@
 import io
+import math
+import os
 import re
+import tempfile
 import zipfile
 from dataclasses import dataclass, field
 
+import pyreadstat
 from openpyxl import load_workbook
 
 from xml_template import assemble_xml, read_default_template
 
 CODING_SHEET_CANDIDATES = ["קידוד", "coding"]
 CATEGORY_SHEET_CANDIDATES = ["קטגוריות", "categories"]
+DATAMAP_SHEET_NAME = "Datamap"
 SAMPLE_SIZE = 20
 
 BLOCK_TYPE_REGULAR = "regular"
 BLOCK_TYPE_AB = "ab"
 BLOCK_TYPE_CLOSED_OTHERS = "closed_others"
+
+RAW_FILE_KIND_EXCEL = "xlsx"
+RAW_FILE_KIND_SPSS = "sav"
 
 
 def normalize(value):
@@ -21,6 +29,8 @@ def normalize(value):
     values -> a canonical string (so 2, "2", 2.0 all compare equal)."""
     if value is None:
         return None
+    if isinstance(value, float) and math.isnan(value):
+        return None  # pandas/pyreadstat represent a blank numeric cell as NaN
     s = str(value).strip()
     if s == "":
         return None
@@ -129,16 +139,24 @@ def _union_categories(*category_lists: list[dict]) -> list[dict]:
 
 _AB_SUFFIX_RE = re.compile(r"^(.*?)([ab])$", re.IGNORECASE)
 
+# A question's own identifier is usually a plain number ("7"), but matrix/grid
+# questions get a compound, underscore-joined identifier instead (e.g. "57_60"
+# for q57_60r10oe) -- so the "qN" part below is not just \d+.
+_QID = r"\d+(?:_\d+)*"
+
 # Raw Decipher data-file column naming: q{question}r{answer}oe holds the free-text
 # "other" answer, q{question}r{answer} holds the closed 0/1 answers.
-_OE_COL_RE = re.compile(r"^q(\d+)r(\d+)oe$", re.IGNORECASE)
-_R_COL_RE = re.compile(r"^q(\d+)r(\d+)$", re.IGNORECASE)
+_OE_COL_RE = re.compile(rf"^q({_QID})r(\d+)oe$", re.IGNORECASE)
+_R_COL_RE = re.compile(rf"^q({_QID})r(\d+)$", re.IGNORECASE)
+# Datamap sheet header lines look like "varname: Question label text" or
+# "[varname]: Question label text" (bracketed for single/text variables).
+_DATAMAP_LABEL_RE = re.compile(r"^\[?(?P<name>[A-Za-z0-9_]+)\]?:\s*(?P<label>.+)$")
 # OTC block name for a closed+other question is usually the bare question number
 # (e.g. "q7"), but some OTC files name the block after the raw "oe" column instead
 # -- either the short form ("q7oe") or the full raw-file column name ("q7r6oe").
 # Either "oe" form is a strong signal the question is closed+other.
-_BLOCK_QNUM_RE = re.compile(r"^q(\d+)$", re.IGNORECASE)
-_BLOCK_QNUM_OE_RE = re.compile(r"^q(\d+)oe$", re.IGNORECASE)
+_BLOCK_QNUM_RE = re.compile(rf"^q({_QID})$", re.IGNORECASE)
+_BLOCK_QNUM_OE_RE = re.compile(rf"^q({_QID})oe$", re.IGNORECASE)
 
 
 def extract_block_qnum(name: str) -> tuple[str | None, bool]:
@@ -310,21 +328,126 @@ def log_rows_to_bytes(log_rows: list[list]) -> bytes:
     return ("\r\n".join(lines) + "\r\n").encode("utf-8")
 
 
-def parse_raw_data_file(file_bytes: bytes) -> dict:
-    """Parses the optional raw Decipher data export. Identifies "closed+other"
-    questions via q{N}r{M}oe columns, and collects the surviving "closed
-    answer" columns for each such question (0/blank -> blank, 1 -> the answer
-    number M from the column's own name -- e.g. a "1" in q7r3 becomes 3 --
-    the r{M} column that matches the oe column's answer number removed).
-    Returns:
-      {"questions": {qnum: [closed column names, in file order]},
-       "rows_by_uuid": {uuid: {col_name: value}},
-       "rows_by_record": {record: {col_name: value}}}
-    """
+def parse_datamap_labels(wb) -> dict[str, str]:
+    """Parses the raw data file's "Datamap" sheet for question labels, keyed
+    by lowercased variable name. Header lines look like "varname: label" or
+    "[varname]: label" -- per-answer sub-rows (e.g. for a multi-punch
+    question's r1, r2...) hold the variable name in column B instead of
+    column A, so they're naturally skipped here."""
+    if DATAMAP_SHEET_NAME not in wb.sheetnames:
+        return {}
+    ws = wb[DATAMAP_SHEET_NAME]
+    labels: dict[str, str] = {}
+    for row in ws.iter_rows(values_only=True):
+        if not row or not row[0] or not isinstance(row[0], str):
+            continue
+        m = _DATAMAP_LABEL_RE.match(row[0].strip())
+        if not m:
+            continue
+        labels.setdefault(m.group("name").lower(), m.group("label").strip())
+    return labels
+
+
+def _load_excel_raw_table(file_bytes: bytes):
+    """Returns (header, rows_iterator, labels) for an Excel raw data export."""
     wb = load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
+    labels = parse_datamap_labels(wb)
     ws = wb[wb.sheetnames[0]]
     rows_iter = ws.iter_rows(values_only=True)
     header = list(next(rows_iter))
+    return header, rows_iter, labels
+
+
+def _pairwise_common_suffix(a: str, b: str) -> str:
+    return os.path.commonprefix([a[::-1], b[::-1]])[::-1]
+
+
+def _derive_multipunch_label(texts: list[str]) -> str:
+    """A multi-punch question has no SPSS variable of its own -- only its
+    q{id}r{M} answer columns, each labeled "{answer} - {question}". Every
+    sibling shares the same question suffix, found here via the longest
+    pairwise common suffix (robust to one label being cut short by SPSS's
+    label-length limit) then trimmed back to just after the last " - ",
+    since Hebrew's common grammatical endings can make two *different*
+    answers coincidentally share a few extra trailing characters too."""
+    if not texts:
+        return ""
+    if len(texts) == 1:
+        return texts[0]
+    best = ""
+    for i in range(len(texts)):
+        for j in range(i + 1, len(texts)):
+            suffix = _pairwise_common_suffix(texts[i], texts[j])
+            if len(suffix) > len(best):
+                best = suffix
+    idx = best.rfind(" - ")
+    return (best[idx + 3 :] if idx != -1 else best).strip()
+
+
+def _spss_labels(meta, header: list[str]) -> dict[str, str]:
+    """Question labels from an SPSS file's own variable metadata, instead of
+    a separate "Datamap" sheet. A plain single-response/text variable has a
+    clean "varname: question" label. A multi-punch question's label is
+    derived from its q{id}r{M} answer columns instead (see
+    _derive_multipunch_label) since it has no variable of its own."""
+    labels: dict[str, str] = {}
+    for name, label in (meta.column_names_to_labels or {}).items():
+        if not label:
+            continue
+        prefix = f"{name}: "
+        text = label[len(prefix) :] if label.startswith(prefix) else label
+        labels[name.lower()] = text.strip()
+
+    by_qid: dict[str, list[str]] = {}
+    for name in header:
+        m = _R_COL_RE.match(name)
+        if m:
+            by_qid.setdefault(m.group(1), []).append(name)
+    for qid, cols in by_qid.items():
+        qname = f"q{qid}"
+        if qname in labels:
+            continue  # a real "q7" variable already gave us a clean label
+        texts = [labels[c.lower()] for c in cols if not c.lower().endswith("oe") and c.lower() in labels]
+        derived = _derive_multipunch_label(texts)
+        if derived:
+            labels[qname] = derived
+    return labels
+
+
+def _load_spss_raw_table(file_bytes: bytes):
+    """Returns (header, rows_iterator, labels) for an SPSS .sav raw data
+    export. pyreadstat needs a real file path rather than bytes, hence the
+    temp file."""
+    with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+    try:
+        df, meta = pyreadstat.read_sav(tmp_path)
+    finally:
+        os.unlink(tmp_path)
+    header = list(meta.column_names)
+    labels = _spss_labels(meta, header)
+    rows_iter = iter(df.itertuples(index=False, name=None))
+    return header, rows_iter, labels
+
+
+def parse_raw_data_file(file_bytes: bytes, file_kind: str = RAW_FILE_KIND_EXCEL) -> dict:
+    """Parses the raw Decipher data export (Excel or SPSS .sav). Identifies
+    "closed+other" questions via q{N}r{M}oe columns, and collects the
+    surviving "closed answer" columns for each such question (0/blank ->
+    blank, 1 -> the answer number M from the column's own name -- e.g. a "1"
+    in q7r3 becomes 3 -- the r{M} column that matches the oe column's answer
+    number removed). Also resolves question labels (Excel's "Datamap" sheet,
+    or the SPSS file's own variable metadata). Returns:
+      {"questions": {qnum: [closed column names, in file order]},
+       "rows_by_uuid": {uuid: {col_name: value}},
+       "rows_by_record": {record: {col_name: value}},
+       "labels": {variable_name_lowercased: label}}
+    """
+    if file_kind == RAW_FILE_KIND_SPSS:
+        header, rows_iter, labels = _load_spss_raw_table(file_bytes)
+    else:
+        header, rows_iter, labels = _load_excel_raw_table(file_bytes)
     header_index = {str(h).strip(): i for i, h in enumerate(header) if h is not None}
 
     record_idx = header_index.get("record")
@@ -374,13 +497,17 @@ def parse_raw_data_file(file_bytes: bytes) -> dict:
             rows_by_uuid[uid] = values
         if record is not None:
             rows_by_record[record] = values
-        all_rows.append((record_raw, uid_raw, values))
+        # Use the normalized record/uuid (not the raw values) in the output-facing
+        # row too -- SPSS returns every numeric column as a float (e.g. 2.0), which
+        # would otherwise leak a literal ".0" into the exported .dat file's columns.
+        all_rows.append((record if record is not None else record_raw, uid if uid is not None else uid_raw, values))
 
     return {
         "questions": questions,
         "rows_by_uuid": rows_by_uuid,
         "rows_by_record": rows_by_record,
         "all_rows": all_rows,
+        "labels": labels,
     }
 
 
@@ -400,7 +527,9 @@ def _otc_block_lookup(ws, block: QuestionBlock) -> tuple[dict, dict]:
     return by_uuid, by_record
 
 
-def detect_and_describe(file_bytes: bytes, raw_file_bytes: bytes | None = None) -> dict:
+def detect_and_describe(
+    file_bytes: bytes, raw_file_bytes: bytes | None = None, raw_file_kind: str = RAW_FILE_KIND_EXCEL
+) -> dict:
     """Step 1: parse the workbook and return blocks with suggested types and
     their category dictionaries, for the mapping-confirmation screen."""
     wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
@@ -408,7 +537,7 @@ def detect_and_describe(file_bytes: bytes, raw_file_bytes: bytes | None = None) 
     blocks = [b for b in detect_blocks(ws) if b.code_count > 0]
     categories = load_categories(wb)
     ab_suggestions = suggest_ab_pairs(blocks)
-    raw_data = parse_raw_data_file(raw_file_bytes) if raw_file_bytes else None
+    raw_data = parse_raw_data_file(raw_file_bytes, raw_file_kind) if raw_file_bytes else None
 
     results = []
     for block in blocks:
@@ -443,6 +572,7 @@ def generate_outputs(
     mapping: list[dict],
     template_text: str | None = None,
     raw_file_bytes: bytes | None = None,
+    raw_file_kind: str = RAW_FILE_KIND_EXCEL,
 ) -> dict:
     """Step 2: apply the confirmed type mapping and produce the .dat / log /
     XML files. `mapping` is a list of {name, type, cleaned_code?}."""
@@ -451,13 +581,18 @@ def generate_outputs(
     blocks = {b.name: b for b in detect_blocks(ws) if b.code_count > 0}
     mapping_by_name = {m["name"]: m for m in mapping if m["name"] in blocks}
     categories = load_categories(wb)
-    raw_data = parse_raw_data_file(raw_file_bytes) if raw_file_bytes else None
+    raw_data = parse_raw_data_file(raw_file_bytes, raw_file_kind) if raw_file_bytes else None
 
     results = []
     dat_files = {}
     warnings = []
     handled = set()
     xml_question_entries = []
+
+    labels = raw_data["labels"] if raw_data else {}
+
+    def question_label(name: str) -> str | None:
+        return labels.get(name.lower())
 
     ab_entries = [m for m in mapping_by_name.values() if m.get("type") == BLOCK_TYPE_AB]
     ab_suggestions = suggest_ab_pairs(list(blocks.values()))
@@ -545,6 +680,7 @@ def generate_outputs(
                 "name": f"{block_a.name}_coded",
                 "code_count": len(cols_a) - 2,
                 "categories": categories_a,
+                "label": question_label(block_a.name),
             }
         )
         xml_question_entries.append(
@@ -552,6 +688,7 @@ def generate_outputs(
                 "name": f"{block_b.name}_coded",
                 "code_count": len(cols_b) - 2,
                 "categories": categories_union,
+                "label": question_label(block_b.name),
             }
         )
 
@@ -631,9 +768,9 @@ def generate_outputs(
         xml_question_entries.append(
             {
                 "name": f"{display_name}_coded",
-                "code_count": otc_code_count,
-                "code_offset": len(closed_columns),
+                "code_count": len(columns) - 2,
                 "categories": combined_categories,
+                "label": question_label(display_name),
             }
         )
 
@@ -664,6 +801,7 @@ def generate_outputs(
                 "name": f"{display_name}_coded",
                 "code_count": block.code_count,
                 "categories": categories.get(block.name, []),
+                "label": question_label(display_name),
             }
         )
 

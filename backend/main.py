@@ -6,8 +6,16 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from processing import detect_and_describe, generate_outputs, zip_dat_files
+from processing import (
+    RAW_FILE_KIND_EXCEL,
+    RAW_FILE_KIND_SPSS,
+    detect_and_describe,
+    generate_outputs,
+    zip_dat_files,
+)
 from xml_template import extract_template_block, read_default_template, write_default_template
+
+RAW_FILE_EXTENSIONS = {".xlsx": RAW_FILE_KIND_EXCEL, ".xlsm": RAW_FILE_KIND_EXCEL, ".sav": RAW_FILE_KIND_SPSS}
 
 app = FastAPI(title="OE Decipher Uploader", version="0.4.0")
 
@@ -18,21 +26,21 @@ JOBS: dict[str, dict] = {}
 @app.post("/api/upload")
 async def upload(
     otc_file: UploadFile = File(...),
-    raw_data_file: UploadFile | None = File(None),
+    raw_data_file: UploadFile = File(...),
 ):
     if not otc_file.filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(400, "Please upload an .xlsx file")
 
-    file_bytes = await otc_file.read()
+    raw_ext = Path(raw_data_file.filename.lower()).suffix
+    raw_file_kind = RAW_FILE_EXTENSIONS.get(raw_ext)
+    if raw_file_kind is None:
+        raise HTTPException(400, "קובץ הנתונים הגולמי חייב להיות מסוג xlsx או sav")
 
-    raw_file_bytes = None
-    if raw_data_file is not None and raw_data_file.filename:
-        if not raw_data_file.filename.lower().endswith((".xlsx", ".xlsm")):
-            raise HTTPException(400, "קובץ הנתונים הגולמי חייב להיות מסוג xlsx")
-        raw_file_bytes = await raw_data_file.read()
+    file_bytes = await otc_file.read()
+    raw_file_bytes = await raw_data_file.read()
 
     try:
-        description = detect_and_describe(file_bytes, raw_file_bytes)
+        description = detect_and_describe(file_bytes, raw_file_bytes, raw_file_kind=raw_file_kind)
     except Exception as exc:
         raise HTTPException(400, f"Failed to process file: {exc}") from exc
 
@@ -40,7 +48,12 @@ async def upload(
         raise HTTPException(400, "No question blocks with coded answers were detected")
 
     job_id = uuid.uuid4().hex
-    JOBS[job_id] = {"file_bytes": file_bytes, "raw_file_bytes": raw_file_bytes, "dat_files": None}
+    JOBS[job_id] = {
+        "file_bytes": file_bytes,
+        "raw_file_bytes": raw_file_bytes,
+        "raw_file_kind": raw_file_kind,
+        "dat_files": None,
+    }
 
     return {"job_id": job_id, "blocks": description["blocks"]}
 
@@ -71,6 +84,7 @@ async def generate(
             mapping_list,
             template_text=template_text,
             raw_file_bytes=job.get("raw_file_bytes"),
+            raw_file_kind=job.get("raw_file_kind", RAW_FILE_KIND_EXCEL),
         )
     except Exception as exc:
         raise HTTPException(400, f"Failed to generate output: {exc}") from exc
